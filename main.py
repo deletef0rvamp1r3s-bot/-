@@ -16,28 +16,38 @@ app = Flask(__name__)
 PRIVATE_CHANNEL = -1004495050725  # قناة المخزن السري
 PUBLIC_CHANNEL = -1004102734458   # قناة الإعلانات العامة
 
+# 3. 🗂️ ملفات الذاكرة والسجل
 DB_FILE = "database.json"
-db_lock = threading.Lock()  # قفل ذكي لمنع تجمد أو تداخل البيانات أثناء القراءة والكتابة
+HISTORY_FILE = "history.json" # ملف جديد لمنع تكرار المقاطع
+db_lock = threading.Lock()
 
-# إنشاء ملف الذاكرة إذا لم يكن موجوداً
-if not os.path.exists(DB_FILE):
-    with open(DB_FILE, "w") as f:
-        json.dump([], f)
+# إنشاء ملفات الذاكرة إذا لم تكن موجودة
+for file in [DB_FILE, HISTORY_FILE]:
+    if not os.path.exists(file):
+        with open(file, "w") as f:
+            json.dump([], f)
 
-# مخزن مؤقت لتجميع الرسائل الحالية قبل حفظها
 temp_post_ids = []
 
-# 📡 المستشعر الذكي: يراقب قناة المخزن ويسجل المنشورات تلقائياً
+# 🛠️ أمر خاص بالآدمن لفحص الذاكرة من تليجرام مباشرة
+@bot.message_handler(commands=['db'])
+def check_db(message):
+    try:
+        with open(DB_FILE, "r") as f:
+            data = f.read()
+        bot.reply_to(message, f"📂 محتوى الذاكرة حالياً:\n{data}")
+    except Exception as e:
+        bot.reply_to(message, f"⚠️ خطأ في قراءة الذاكرة: {e}")
+
+# 📡 المستشعر الذكي: يراقب قناة المخزن ويسجل المنشورات
 @bot.channel_post_handler(func=lambda message: message.chat.id == PRIVATE_CHANNEL)
 def auto_save_posts(message):
     global temp_post_ids
     
-    # إذا كانت الرسالة نصية صافية (بدون ميديا) فهذا يعني أنها النص الشارح (نهاية المنشور)
     if message.text and not (message.photo or message.video or message.animation or message.document):
         if temp_post_ids:
             temp_post_ids.append(message.message_id)
             
-            # حفظ المجموعة بأمان داخل ملف الذاكرة باستخدام القفل المشترك
             with db_lock:
                 try:
                     with open(DB_FILE, "r") as f:
@@ -50,62 +60,77 @@ def auto_save_posts(message):
                     with open(DB_FILE, "w") as f:
                         json.dump(data, f)
                         
-            print(f"💾 تم رصد وحفظ منشور جديد في الذاكرة: {temp_post_ids}")
-            temp_post_ids = [] # تصفير المخزن للمنشور القادم
+            print(f"💾 تم رصد وحفظ منشور جديد: {temp_post_ids}")
+            temp_post_ids = []
     else:
-        # إذا كانت الرسالة ميديا (فيديو واحد أو مجموعة وسائط متتالية) نضيف رقمها للمجموعة
         temp_post_ids.append(message.message_id)
 
-# 🚀 دالة النشر العشوائي الحقيقي
+# 🚀 دالة النشر العشوائي (بدون تكرار)
 def send_random_clip():
-    print("🔍 جاري اختيار منشور عشوائي من الذاكرة...")
+    print("🔍 جاري اختيار منشور عشوائي...")
     
     with db_lock:
         try:
             with open(DB_FILE, "r") as f:
                 all_posts = json.load(f)
+            with open(HISTORY_FILE, "r") as f:
+                history = json.load(f)
         except Exception as e:
-            print(f"❌ خطأ في قراءة ملف الذاكرة: {e}")
+            print(f"❌ خطأ في قراءة الملفات: {e}")
             return
 
     if not all_posts:
-        print("⚠️ الذاكرة فارغة! لا توجد منشورات مسجلة للنشر حالياً.")
+        print("⚠️ الذاكرة فارغة! بانتظار إضافة منشورات في المخزن.")
         return
         
-    # اختيار عشوائي حقيقي ومحدث في كل مرة تشتغل فيها الدالة
-    selected_post = random.choice(all_posts)
+    # استبعاد المقاطع التي تم نشرها مؤخراً لمنع التكرار
+    available_posts = [p for p in all_posts if p not in history]
+    
+    # إذا تم نشر كل المقاطع، نصفر السجل لنبدأ دورة جديدة
+    if not available_posts:
+        print("🔄 تم نشر جميع المقاطع مسبقاً، جاري تصفير السجل للبدء من جديد...")
+        history = []
+        available_posts = all_posts
+
+    # اختيار عشوائي من المقاطع المتاحة (من فوق، وسط، أو تحت)
+    selected_post = random.choice(available_posts)
     
     try:
-        # نسخ الرسائل ككتلة واحدة وبنفس الترتيب وبدون كلمة "محول من"
+        # النقل ككتلة واحدة وبدون حقوق
         bot.copy_messages(
             chat_id=PUBLIC_CHANNEL,
             from_chat_id=PRIVATE_CHANNEL,
             message_ids=selected_post
         )
-        print(f"✅ تم بنجاح نشر المنشور ذو المعرفات: {selected_post}")
+        print(f"✅ تم النشر بنجاح: {selected_post}")
+        
+        # تسجيل المقطع في سجل المنشورات لمنع تكراره
+        history.append(selected_post)
+        with db_lock:
+            with open(HISTORY_FILE, "w") as f:
+                json.dump(history, f)
+                
     except Exception as e:
-        print(f"❌ حدث خطأ أثناء النشر للمجموعة {selected_post}: {e}")
+        print(f"❌ حدث خطأ أثناء النشر: {e}")
 
 @app.route('/')
 def home():
-    return "بوت النشر التلقائي الذكي يعمل بنجاح وبأعلى درجات الاستقرار!"
+    return "البوت يعمل بنجاح ومستقر 100% 🚀"
 
-# ⏰ ضبط توقيت الحملة (بتوقيت الرياض)
+# ⏰ ضبط التوقيت: النشر كل 15 دقيقة (تستطيع تغيير الرقم 15 لأي رقم تريده)
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
-
-# الفترة الأولى: من 12:00 منتصف الليل وحتى 12:50 الليل (كل 10 دقائق)
-scheduler.add_job(send_random_clip, 'cron', hour=0, minute='0,10,20,30,40,50')
-
-# الفترة الثانية: من 1:00 بعد منتصف الليل وحتى 1:30 الليل (كل 10 دقائق)
-scheduler.add_job(send_random_clip, 'cron', hour=1, minute='0,10,20,30')
-
+scheduler.add_job(send_random_clip, 'interval', minutes=5)
 scheduler.start()
 
 if __name__ == "__main__":
-    # تشغيل مستمع البوت في الخلفية لمراقبة القناة دون التأثير على سيرفر الويب
+    # 🛑 مسح أي تعارض سابق يمنع البوت من استلام الرسائل
+    try:
+        bot.remove_webhook()
+    except:
+        pass
+        
+    # تشغيل البوت في الخلفية مع حماية ضد التوقف
     threading.Thread(target=lambda: bot.infinity_polling(timeout=10, long_polling_timeout=5), daemon=True).start()
     
     port = int(os.environ.get("PORT", 10000))
-    
-    # 🛑 إيقاف الـ reloader لمنع تكرار الإرسال
     app.run(host="0.0.0.0", port=port, use_reloader=False, debug=False)
