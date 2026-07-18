@@ -17,6 +17,7 @@ PRIVATE_CHANNEL = -1004495050725  # قناة المخزن السري
 PUBLIC_CHANNEL = -1004102734458   # قناة الإعلانات العامة
 
 DB_FILE = "database.json"
+db_lock = threading.Lock()  # قفل ذكي لمنع تجمد أو تداخل البيانات أثناء القراءة والكتابة
 
 # إنشاء ملف الذاكرة إذا لم يكن موجوداً
 if not os.path.exists(DB_FILE):
@@ -36,30 +37,36 @@ def auto_save_posts(message):
         if temp_post_ids:
             temp_post_ids.append(message.message_id)
             
-            # حفظ المجموعة كاملة في ملف الذاكرة
-            with open(DB_FILE, "r+") as f:
-                data = json.load(f)
+            # حفظ المجموعة بأمان داخل ملف الذاكرة باستخدام القفل المشترك
+            with db_lock:
+                try:
+                    with open(DB_FILE, "r") as f:
+                        data = json.load(f)
+                except:
+                    data = []
+                    
                 if temp_post_ids not in data:
                     data.append(temp_post_ids)
-                    f.seek(0)
-                    json.dump(data, f)
-                    f.truncate()
+                    with open(DB_FILE, "w") as f:
+                        json.dump(data, f)
+                        
             print(f"💾 تم رصد وحفظ منشور جديد في الذاكرة: {temp_post_ids}")
             temp_post_ids = [] # تصفير المخزن للمنشور القادم
     else:
-        # إذا كانت الرسالة ميديا (فيديو أو قروب ميديا) نضيف رقمها للمجموعة
+        # إذا كانت الرسالة ميديا (فيديو واحد أو مجموعة وسائط متتالية) نضيف رقمها للمجموعة
         temp_post_ids.append(message.message_id)
 
 # 🚀 دالة النشر العشوائي الحقيقي
 def send_random_clip():
     print("🔍 جاري اختيار منشور عشوائي من الذاكرة...")
     
-    try:
-        with open(DB_FILE, "r") as f:
-            all_posts = json.load(f)
-    except Exception as e:
-        print(f"❌ خطأ في قراءة ملف الذاكرة: {e}")
-        return
+    with db_lock:
+        try:
+            with open(DB_FILE, "r") as f:
+                all_posts = json.load(f)
+        except Exception as e:
+            print(f"❌ خطأ في قراءة ملف الذاكرة: {e}")
+            return
 
     if not all_posts:
         print("⚠️ الذاكرة فارغة! لا توجد منشورات مسجلة للنشر حالياً.")
@@ -69,7 +76,7 @@ def send_random_clip():
     selected_post = random.choice(all_posts)
     
     try:
-        # نسخ الرسائل ككتلة واحدة وبنفس الترتيب بدون كلمة "محول من"
+        # نسخ الرسائل ككتلة واحدة وبنفس الترتيب وبدون كلمة "محول من"
         bot.copy_messages(
             chat_id=PUBLIC_CHANNEL,
             from_chat_id=PRIVATE_CHANNEL,
@@ -86,14 +93,15 @@ def home():
 # ⏰ ضبط توقيت الحملة (بتوقيت الرياض)
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
 
-# 🔥 التعديل الجديد للتجربة: النشر كل 5 دقائق ابتداءً من الساعة 7 مساءً (19) وحتى نهاية اليوم
+# النشر كل 5 دقائق ابتداءً من الساعة 7 مساءً (19) وحتى نهاية اليوم
 scheduler.add_job(send_random_clip, 'cron', hour='19-23', minute='*/5')
-
 scheduler.start()
 
 if __name__ == "__main__":
     # تشغيل مستمع البوت في الخلفية لمراقبة القناة دون التأثير على سيرفر الويب
-    threading.Thread(target=lambda: bot.infinity_polling(allowed_updates=['channel_post']), daemon=True).start()
+    threading.Thread(target=lambda: bot.infinity_polling(timeout=10, long_polling_timeout=5), daemon=True).start()
     
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    
+    # 🛑 الإصلاح الأهم: إيقاف الـ reloader والـ debug لمنع تشغيل الكود مرتين وتجنب الحظر
+    app.run(host="0.0.0.0", port=port, use_reloader=False, debug=False)
