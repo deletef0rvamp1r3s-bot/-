@@ -66,8 +66,8 @@ def send_random_clip():
 
 # إعداد توقيت الحملة
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
-scheduler.add_job(send_random_clip, 'cron', hour=17, minute='3,6,20,30,40,50')
-scheduler.add_job(send_random_clip, 'cron', hour=17, minute='20,30,20,30')
+scheduler.add_job(send_random_clip, 'cron', hour=17, minute='15,20,25,35,40,50')
+scheduler.add_job(send_random_clip, 'cron', hour=18, minute='20,30,20,30')
 scheduler.start()
 
 def run_bot():
