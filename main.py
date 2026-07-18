@@ -5,7 +5,7 @@ from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
 import os
 
-BOT_TOKEN = "ضع_توكن_بوتك_الجديد_هنا"
+BOT_TOKEN = "8990766814:AAHj-H3Ug3fbTVtqiGvrwgI49dOiW-eZOkA"
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
