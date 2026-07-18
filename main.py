@@ -53,10 +53,10 @@ def send_random_clip():
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
 
 # الفترة الأولى: من 12:00 منتصف الليل وحتى 12:50 الليل
-scheduler.add_job(send_random_clip, 'cron', hour=17, minute='0,10,20,30,40,50')
+scheduler.add_job(send_random_clip, 'cron', hour=0, minute='0,10,20,30,40,50')
 
 # الفترة الثانية: من 1:00 بعد منتصف الليل وحتى 1:30 الليل
-scheduler.add_job(send_random_clip, 'cron', hour=18, minute='0,10,20,30')
+scheduler.add_job(send_random_clip, 'cron', hour=1, minute='0,10,20,30')
 
 scheduler.start()
 
