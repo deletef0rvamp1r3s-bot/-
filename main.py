@@ -1,65 +1,84 @@
 import telebot
 import random
+import threading
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
 import os
 
-# 1. 🔑 ضع توكن البوت الجديد هنا
-BOT_TOKEN = "8990766814:AAHj-H3Ug3fbTVtqiGvrwgI49dOiW-eZOkA"
+BOT_TOKEN = "ضع_توكن_بوتك_الجديد_هنا"
 bot = telebot.TeleBot(BOT_TOKEN)
-
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "بوت النشر التلقائي يعمل بنجاح!"
+PRIVATE_CHANNEL = -1004495050725
+PUBLIC_CHANNEL = -1004102734458
 
-# 2. 📺 أرقام القنوات الخاصة بك
-PRIVATE_CHANNEL = -1004495050725  # قناة المخزن السري
-PUBLIC_CHANNEL = -1004102734458   # قناة الإعلانات العامة
+# قائمة المنشورات أصبحت ديناميكية (البوت سيعبئها بنفسه)
+POSTS = []
 
-# 3. 📦 قائمة المنشورات (البلونات والنصوص)
-# كل قوسين يمثلون منشور: [رقم أول رسالة في البلونة, رقم الرسالة النصية اللي تحتها]
-# إذا ضفت مقاطع جديدة مستقبلاً، بس أضف أرقامها هنا عشان البوت يسحبها بشكل صحيح
-POSTS = [
-    [2, 3],    # المنشور الأول
-    [4, 5],    # المنشور الثاني 
-    # [6, 7],  # تقدر تضيف المنشورات الجديدة بهذي الطريقة
-]
+# متغيرات التجميع التلقائي
+pending_messages = []
+timer = None
+
+def save_new_post():
+    """دالة لجمع الرسائل التي وصلت معاً وحفظها كمنشور واحد"""
+    global pending_messages, POSTS
+    if pending_messages:
+        # ترتيب الأرقام لضمان أن المقطع أولاً ثم النص
+        pending_messages.sort()
+        POSTS.append(pending_messages.copy())
+        print(f"✅ تم اكتشاف وحفظ منشور جديد آلياً بالأرقام: {pending_messages}")
+        pending_messages.clear()
+
+@bot.channel_post_handler(func=lambda message: message.chat.id == PRIVATE_CHANNEL)
+def catch_new_posts(message):
+    """الاستماع للقناة السرية وجمع الرسائل المتتالية"""
+    global pending_messages, timer
+    
+    pending_messages.append(message.message_id)
+    
+    # إلغاء العداد القديم وبدء عداد جديد لـ 3 ثواني
+    # (ينتظر البوت ليرى هل هناك رسائل تابعة لنفس البوست كالنص مثلاً)
+    if timer is not None:
+        timer.cancel()
+        
+    timer = threading.Timer(3.0, save_new_post)
+    timer.start()
 
 def send_random_clip():
+    """المسؤول عن النشر العشوائي في الأوقات المجدولة"""
+    if not POSTS:
+        print("⚠️ لا يوجد منشورات محفوظة في ذاكرة البوت حالياً.")
+        return
+        
     print("🔍 جاري اختيار منشور عشوائي للنشر...")
-    
-    # اختيار منشور عشوائي من القائمة
     selected_post = random.choice(POSTS)
-    start_id = selected_post[0]
-    end_id = selected_post[1]
-    
-    # إنشاء قائمة بجميع أرقام الرسائل لهذا المنشور لنسخها كدفعة واحدة
-    msg_ids = list(range(start_id, end_id + 1))
     
     try:
-        # 🚀 السر هنا: copy_messages تنسخ البلونة والنص معاً بدون كلمة "محول من"
-        bot.copy_messages(
+        # استخدام forward_messages لنقل الألبوم كاملاً مع النص بالترتيب
+        bot.forward_messages(
             chat_id=PUBLIC_CHANNEL,
             from_chat_id=PRIVATE_CHANNEL,
-            message_ids=msg_ids
+            message_ids=selected_post
         )
-        print(f"✅ تم بنجاح نشر المنشور المكون من الرسائل: {msg_ids}")
+        print(f"✅ تم النشر بنجاح: {selected_post}")
     except Exception as e:
         print(f"❌ حدث خطأ أثناء النشر: {e}")
 
-# 4. ⏰ ضبط توقيت الحملة (بتوقيت الرياض)
+# إعداد توقيت الحملة
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
-
-# الفترة الأولى: من 12:00 منتصف الليل وحتى 12:50 الليل
-scheduler.add_job(send_random_clip, 'cron', hour=16, minute='24,10,20,30,40,50')
-
-# الفترة الثانية: من 1:00 بعد منتصف الليل وحتى 1:30 الليل
-scheduler.add_job(send_random_clip, 'cron', hour=16, minute='50,10,20,30')
-
+scheduler.add_job(send_random_clip, 'cron', hour=16, minute='35,5,20,30,40,50')
+scheduler.add_job(send_random_clip, 'cron', hour=16, minute='55,10,20,30')
 scheduler.start()
 
+def run_bot():
+    print("🤖 البوت يعمل الآن.. ينتظر منشوراتك الجديدة ويترقب وقت النشر.")
+    bot.infinity_polling()
+
+@app.route('/')
+def home():
+    return f"البوت يعمل! عدد المنشورات الجاهزة للنشر العشوائي: {len(POSTS)}"
+
 if __name__ == "__main__":
+    threading.Thread(target=run_bot).start()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
