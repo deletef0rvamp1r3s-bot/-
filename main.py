@@ -103,5 +103,5 @@ if __name__ == "__main__":
     
     port = int(os.environ.get("PORT", 10000))
     
-    # 🛑 الإصلاح الأهم: إيقاف الـ reloader والـ debug لمنع تشغيل الكود مرتين وتجنب الحظر
+    # 🛑 إيقاف الـ reloader لمنع تكرار الإرسال
     app.run(host="0.0.0.0", port=port, use_reloader=False, debug=False)
