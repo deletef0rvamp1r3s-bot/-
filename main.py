@@ -16,94 +16,109 @@ app = Flask(__name__)
 PRIVATE_CHANNEL = -1004495050725
 PUBLIC_CHANNEL = -1004102734458
 
-# 3. 🗂️ ملفات الذاكرة والسجل
-DB_FILE = "database.json"
-HISTORY_FILE = "history.json"
+# 📦 الـ 43 مقطع الأساسية الخاصة بك (مستخرجة من صورتك لحمايتها للأبد)
+INITIAL_POSTS = [
+    {"ids": [499, 500], "media_group_id": None}, {"ids": [501, 502], "media_group_id": None},
+    {"ids": [503, 504], "media_group_id": None}, {"ids": [505, 506], "media_group_id": None},
+    {"ids": [507, 508, 509], "media_group_id": None}, {"ids": [510, 511], "media_group_id": None},
+    {"ids": [512, 513], "media_group_id": None}, {"ids": [514, 516, 515], "media_group_id": None},
+    {"ids": [517, 518], "media_group_id": None}, {"ids": [519, 520], "media_group_id": None},
+    {"ids": [521, 522, 523], "media_group_id": None}, {"ids": [524, 525], "media_group_id": None},
+    {"ids": [526, 527], "media_group_id": None}, {"ids": [528, 530, 529, 531], "media_group_id": None},
+    {"ids": [532, 533], "media_group_id": None}, {"ids": [534, 535], "media_group_id": None},
+    {"ids": [536, 537], "media_group_id": None}, {"ids": [538, 539, 540, 541], "media_group_id": None},
+    {"ids": [542, 543], "media_group_id": None}, {"ids": [544, 545], "media_group_id": None},
+    {"ids": [546, 547], "media_group_id": None}, {"ids": [548, 549], "media_group_id": None},
+    {"ids": [550, 551], "media_group_id": None}, {"ids": [552, 554, 553, 555], "media_group_id": None},
+    {"ids": [556, 557], "media_group_id": None}, {"ids": [558, 560, 559, 561, 562], "media_group_id": None},
+    {"ids": [563, 564], "media_group_id": None}, {"ids": [565, 567, 566, 568], "media_group_id": None},
+    {"ids": [569, 570, 572, 571, 574, 573, 575], "media_group_id": None}, {"ids": [576, 577], "media_group_id": None},
+    {"ids": [578, 579], "media_group_id": None}, {"ids": [580, 581, 582, 583], "media_group_id": None},
+    {"ids": [584, 585, 586], "media_group_id": None}, {"ids": [587, 588], "media_group_id": None},
+    {"ids": [589, 590], "media_group_id": None}, {"ids": [591, 592, 593, 594], "media_group_id": None},
+    {"ids": [595, 596], "media_group_id": None}, {"ids": [597, 598], "media_group_id": None},
+    {"ids": [599, 600, 601], "media_group_id": None}, {"ids": [602, 603], "media_group_id": None},
+    {"ids": [604, 605], "media_group_id": None}, {"ids": [606, 608, 607, 609], "media_group_id": None},
+    {"ids": [610, 611, 1840, 1841, 1842], "media_group_id": None}
+]
+
 db_lock = threading.Lock()
 
-# إنشاء الملفات إذا لم تكن موجودة
-for file in [DB_FILE, HISTORY_FILE]:
-    if not os.path.exists(file):
-        with open(file, "w") as f:
-            json.dump([], f)
+# 🔄 دالتان ذكيتان لجلب وحفظ البيانات عبر الرسائل المثبتة في قناتك الخاصة مباشرة
+def get_cloud_db():
+    try:
+        chat = bot.get_chat(PRIVATE_CHANNEL)
+        if chat.pinned_message and chat.pinned_message.text and '{"posts":' in chat.pinned_message.text:
+            return json.loads(chat.pinned_message.text), chat.pinned_message.message_id
+    except Exception as e:
+        print(f"⚠️ تنبيه أثناء جلب الذاكرة السحابية: {e}")
+    return {"posts": INITIAL_POSTS, "history": []}, None
 
-# 📡 المستشعر الذكي والمعاد هندسته بالكامل (مقاوم للأخطاء)
+def save_cloud_db(db_data, msg_id):
+    text_data = json.dumps(db_data)
+    try:
+        if msg_id:
+            bot.edit_message_text(chat_id=PRIVATE_CHANNEL, message_id=msg_id, text=text_data)
+        else:
+            chat = bot.get_chat(PRIVATE_CHANNEL)
+            if chat.pinned_message and chat.pinned_message.text and '{"posts":' in chat.pinned_message.text:
+                bot.edit_message_text(chat_id=PRIVATE_CHANNEL, message_id=chat.pinned_message.message_id, text=text_data)
+            else:
+                msg = bot.send_message(chat_id=PRIVATE_CHANNEL, text=text_data)
+                bot.pin_chat_message(chat_id=PRIVATE_CHANNEL, message_id=msg.message_id, disable_notification=True)
+    except Exception as e:
+        print(f"❌ خطأ أثناء حفظ الذاكرة السحابية: {e}")
+
+# 📡 مستشعر ذكي وسحابي (يستقبل ويحفظ الجديد فوراً وبشكل دائم)
 @bot.channel_post_handler(content_types=['text', 'photo', 'video', 'animation', 'document', 'audio', 'voice'])
 def auto_save_posts(message):
-    with db_lock:
-        try:
-            with open(DB_FILE, "r") as f:
-                data = json.load(f)
-        except:
-            data = []
+    if message.chat.id != PRIVATE_CHANNEL:
+        return
+    if message.text and message.text.startswith('{"posts":'):
+        return  # تجاهل رسالة قاعدة البيانات نفسها منعاً للتداخل
 
-        # 1- إذا كانت الرسالة جزءاً من قروب ميديا (ألبوم مقاطع أو صور)
+    with db_lock:
+        db_data, msg_id = get_cloud_db()
+        data = db_data.get("posts", [])
+
         if message.media_group_id:
             found = False
-            # البحث في الذاكرة عن قروب ميديا موجود مسبقاً يحمل نفس المعرف لدمجه معه
             for block in reversed(data):
                 if block.get("media_group_id") == str(message.media_group_id):
                     if message.message_id not in block["ids"]:
                         block["ids"].append(message.message_id)
                     found = True
-                    print(f"🔗 تم دمج ملف إضافي إلى قروب الميديا الحالي: {message.message_id}")
                     break
-            
-            # إذا كان أول ملف يصل من قروب الميديا، ننشئ له كتلة جديدة
             if not found:
-                new_block = {
-                    "ids": [message.message_id],
-                    "media_group_id": str(message.media_group_id)
-                }
-                data.append(new_block)
-                print(f"💾 تم إنشاء كتلة قروب ميديا جديدة: {message.message_id}")
-
-        # 2- إذا كانت الرسالة نصية (الشرح المنفصل الذي يرسل تحت المقطع أو القروب)
+                data.append({"ids": [message.message_id], "media_group_id": str(message.media_group_id)})
         elif message.content_type == 'text':
             if data:
-                # إلحاق النص بآخر كتلة ميديا تم تسجيلها فوراً لربطها بها
                 if message.message_id not in data[-1]["ids"]:
                     data[-1]["ids"].append(message.message_id)
-                    print(f"📄 تم ربط النص {message.message_id} بالمنشور السابق بنجاح.")
             else:
-                # حالة احتياطية إذا أُرسل نص بدون أي ميديا سابقة
                 data.append({"ids": [message.message_id], "media_group_id": None})
-                print(f"📄 تم حفظ نص منفرد: {message.message_id}")
-                
-        # 3- إذا كانت ميديا فردية (مقطع واحد فقط أو صورة واحدة بدون قروب ميديا)
         else:
-            new_block = {
-                "ids": [message.message_id],
-                "media_group_id": None
-            }
-            data.append(new_block)
-            print(f"💾 تم رصد مقطع فردي جديد: {message.message_id}")
+            data.append({"ids": [message.message_id], "media_group_id": None})
 
-        # حفظ التعديلات الهيكلية في ملف الذاكرة
-        with open(DB_FILE, "w") as f:
-            json.dump(data, f)
+        db_data["posts"] = data
+        save_cloud_db(db_data, msg_id)
 
-# 🛠️ أمر فحص الذاكرة
+# 🛠️ أمر فحص الذاكرة (يقرأ مباشرة من السحابة ليعطيك الأرقام الحقيقية)
 @bot.message_handler(commands=['db'])
 def check_db(message):
     try:
-        with open(DB_FILE, "r") as f:
-            data = json.load(f)
-        simplified_data = [block["ids"] for block in data]
-        bot.reply_to(message, f"📂 إجمالي المنشورات المحفوظة: {len(simplified_data)}\nمحتوى الذاكرة الحالية:\n{simplified_data}")
+        db_data, _ = get_cloud_db()
+        simplified_data = [block["ids"] for block in db_data.get("posts", [])]
+        bot.reply_to(message, f"📂 إجمالي المنشورات المحفوظة سحابياً: {len(simplified_data)}\nمحتوى الذاكرة الحالية:\n{simplified_data}")
     except Exception as e:
-        bot.reply_to(message, f"⚠️ خطأ أثناء قراءة الذاكرة: {e}")
+        bot.reply_to(message, f"⚠️ خطأ: {e}")
 
-# 🚀 دالة النشر العشوائي الذكي
+# 🚀 دالة النشر العشوائي السحابي الدقيق
 def send_random_clip():
     with db_lock:
-        try:
-            with open(DB_FILE, "r") as f:
-                all_blocks = json.load(f)
-            with open(HISTORY_FILE, "r") as f:
-                history = json.load(f)
-        except: 
-            return
+        db_data, msg_id = get_cloud_db()
+        all_blocks = db_data.get("posts", [])
+        history = db_data.get("history", [])
 
     if not all_blocks: 
         return
@@ -111,7 +126,7 @@ def send_random_clip():
     available = [b for b in all_blocks if b["ids"] not in history]
     
     if not available:
-        print("🔄 تم نشر جميع المقاطع، جاري إعادة تصفير السجل للبدء من جديد...")
+        print("🔄 تم نشر جميع المقاطع، جاري إعادة تصفير السجل سحابياً للبدء من جديد...")
         history = []
         available = all_blocks
 
@@ -119,37 +134,26 @@ def send_random_clip():
     selected_ids = selected_block["ids"]
     
     try:
-        bot.copy_messages(
-            chat_id=PUBLIC_CHANNEL, 
-            from_chat_id=PRIVATE_CHANNEL, 
-            message_ids=selected_ids
-        )
+        bot.copy_messages(chat_id=PUBLIC_CHANNEL, from_chat_id=PRIVATE_CHANNEL, message_ids=selected_ids)
         print(f"✅ تم النشر العشوائي بنجاح للكتلة: {selected_ids}")
         
         history.append(selected_ids)
+        db_data["history"] = history
+        
         with db_lock:
-            with open(HISTORY_FILE, "w") as f:
-                json.dump(history, f)
-                
+            save_cloud_db(db_data, msg_id)
     except Exception as e:
         print(f"❌ حدث خطأ أثناء النشر: {e}")
 
 @app.route('/')
 def home():
-    return "البوت يعمل بأعلى كفاءة واستقرار 🚀"
+    return "قاعدة البيانات السحابية تعمل بنجاح واستقرار أزلي 🚀"
 
-# ⏰ المجدول (تم التعديل ليعمل من الساعة 12 الليل إلى 2 الليل كل 10 دقائق بالملي)
+# ⏰ المجدول الدقيق (من الساعة 12 الليل إلى 2 الليل كل 10 دقائق بتوقيت الرياض)
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
-
-# من الساعة 12:00 الليل حتى 12:50 الليل (كل 10 دقائق)
 scheduler.add_job(send_random_clip, 'cron', hour=0, minute='*/10', misfire_grace_time=600, max_instances=3)
-
-# من الساعة 1:00 الليل حتى 1:50 الليل (كل 10 دقائق)
 scheduler.add_job(send_random_clip, 'cron', hour=1, minute='*/10', misfire_grace_time=600, max_instances=3)
-
-# الختام عند الساعة 2:00 الليل بالضبط
 scheduler.add_job(send_random_clip, 'cron', hour=2, minute=0, misfire_grace_time=600, max_instances=3)
-
 scheduler.start()
 
 if __name__ == "__main__":
