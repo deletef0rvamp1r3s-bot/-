@@ -7,7 +7,7 @@ import json
 import threading
 
 # 1. 🔑 توكن البوت الخاص بك
-BOT_TOKEN = "8990766814:AAEUMQplN5Zyg_M-F8orh5ZmTNBkorQj0Iw"
+BOT_TOKEN = "8990766814:AAHPmqRUG3sE2BHTJRmLOVoYmuqj4_rXOBw"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 app = Flask(__name__)
