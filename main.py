@@ -6,13 +6,13 @@ import os
 import json
 import threading
 
-# 1. 🔑 توكن البوت الخاص بك
+# 1. 🔑 توكن البوت
 BOT_TOKEN = "8990766814:AAFtq2VwLHe0nCqrndFj2ucff2fUrsiik9M"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 app = Flask(__name__)
 
-# 2. 📺 أرقام القنوات (تأكد من وجود السالب قبل الرقم)
+# 2. 📺 أرقام القنوات
 PRIVATE_CHANNEL = -1004495050725
 PUBLIC_CHANNEL = -1004102734458
 
@@ -27,7 +27,7 @@ for file in [DB_FILE, HISTORY_FILE]:
         with open(file, "w") as f:
             json.dump([], f)
 
-# دالة حفظ المنشور في قاعدة البيانات
+# دالة حفظ المنشور
 def save_post_to_db(post_ids):
     with db_lock:
         try:
@@ -36,25 +36,31 @@ def save_post_to_db(post_ids):
         except:
             data = []
         
+        # التأكد من عدم تكرار حفظ نفس المعرفات
         if post_ids not in data:
             data.append(post_ids)
             with open(DB_FILE, "w") as f:
                 json.dump(data, f)
-            print(f"💾 تم رصد وحفظ منشور جديد: {post_ids}")
+            print(f"💾 تم رصد وحفظ منشور جديد (IDs: {post_ids})")
 
-# 📡 مستشعر القناة
+# 📡 مستشعر القناة المطور
 @bot.channel_post_handler(func=lambda message: message.chat.id == PRIVATE_CHANNEL)
 def auto_save_posts(message):
-    # حفظ أي نوع من المنشورات (فيديو، صورة، نص)
-    save_post_to_db([message.message_id])
+    # إذا كانت الرسالة جزءاً من مجموعة (فيديو + نص مرسلين معاً)
+    if message.media_group_id:
+        # هنا البوت سيحفظ كل جزء من المجموعة كمنشور منفصل لضمان عدم ضياع أي جزء
+        save_post_to_db([message.message_id])
+    else:
+        # إذا كانت رسالة عادية (فيديو فقط أو نص فقط)
+        save_post_to_db([message.message_id])
 
 # 🛠️ أمر فحص الذاكرة
 @bot.message_handler(commands=['db'])
 def check_db(message):
     try:
         with open(DB_FILE, "r") as f:
-            data = f.read()
-        bot.reply_to(message, f"📂 محتوى الذاكرة حالياً:\n{data}")
+            data = json.load(f)
+        bot.reply_to(message, f"📂 عدد المقاطع المحفوظة: {len(data)}\n{data}")
     except Exception as e:
         bot.reply_to(message, f"⚠️ خطأ: {e}")
 
@@ -77,6 +83,7 @@ def send_random_clip():
 
     selected = random.choice(available)
     try:
+        # copy_messages تنقل الرسالة بكل محتوياتها
         bot.copy_messages(chat_id=PUBLIC_CHANNEL, from_chat_id=PRIVATE_CHANNEL, message_ids=selected)
         history.append(selected)
         with db_lock:
@@ -97,7 +104,7 @@ if __name__ == "__main__":
     try: bot.remove_webhook()
     except: pass
     
-    # تشغيل البوت مع تحديد نوع التحديثات المطلوبة
+    # تشغيل البوت
     threading.Thread(target=lambda: bot.infinity_polling(allowed_updates=['channel_post', 'message']), daemon=True).start()
     
     port = int(os.environ.get("PORT", 10000))
