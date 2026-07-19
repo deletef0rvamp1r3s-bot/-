@@ -7,7 +7,7 @@ import json
 import threading
 
 # 1. 🔑 توكن البوت الخاص بك
-BOT_TOKEN = "8990766814:AAFqaYY5NUaRW77fqZpyTVnY5SeIC9-_R00"
+BOT_TOKEN = "8990766814:AAEUMQplN5Zyg_M-F8orh5ZmTNBkorQj0Iw"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 app = Flask(__name__)
@@ -83,13 +83,12 @@ def auto_save_posts(message):
         with open(DB_FILE, "w") as f:
             json.dump(data, f)
 
-# 🛠️ أمر فحص الذاكرة (تم تعديله ليعرض لك الأقواس مبسطة ومدمجة تماماً كما تحب)
+# 🛠️ أمر فحص الذاكرة
 @bot.message_handler(commands=['db'])
 def check_db(message):
     try:
         with open(DB_FILE, "r") as f:
             data = json.load(f)
-        # استخراج القوائم فقط لتبسيط العرض لك
         simplified_data = [block["ids"] for block in data]
         bot.reply_to(message, f"📂 إجمالي المنشورات المحفوظة: {len(simplified_data)}\nمحتوى الذاكرة الحالية:\n{simplified_data}")
     except Exception as e:
@@ -109,21 +108,17 @@ def send_random_clip():
     if not all_blocks: 
         return
     
-    # تصفية المنشورات (البلوكات) التي لم يتم نشرها بعد
     available = [b for b in all_blocks if b["ids"] not in history]
     
-    # إذا انتهت كل المنشورات، صفر السجل وابدأ العشوائية من جديد
     if not available:
         print("🔄 تم نشر جميع المقاطع، جاري إعادة تصفير السجل للبدء من جديد...")
         history = []
         available = all_blocks
 
-    # اختيار عشوائي تماماً (random.choice تضمن أخذ المنشور من أي مكان بالقناة)
     selected_block = random.choice(available)
     selected_ids = selected_block["ids"]
     
     try:
-        # دالة copy_messages تنسخ الكتلة كاملة (المقاطع + النص التابع لها) دفعة واحدة وبترتيبها الصحيح
         bot.copy_messages(
             chat_id=PUBLIC_CHANNEL, 
             from_chat_id=PRIVATE_CHANNEL, 
@@ -131,7 +126,6 @@ def send_random_clip():
         )
         print(f"✅ تم النشر العشوائي بنجاح للكتلة: {selected_ids}")
         
-        # إضافة الكتلة المنشورة للسجل
         history.append(selected_ids)
         with db_lock:
             with open(HISTORY_FILE, "w") as f:
@@ -144,9 +138,15 @@ def send_random_clip():
 def home():
     return "البوت يعمل بأعلى كفاءة واستقرار 🚀"
 
-# ⏰ المجدول الدشين (كل 5 دقائق)
+# ⏰ المجدول المطور (يعمل من الساعة 12 الليل إلى 1:30 الليل كل 10 دقائق بتوقيت الرياض)
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
-scheduler.add_job(send_random_clip, 'interval', minutes=5)
+
+# الجزء الأول: من الساعة 12:00 الليل حتى 12:50 الليل (كل 10 دقائق)
+scheduler.add_job(send_random_clip, 'cron', hour=0, minute='*/10')
+
+# الجزء الثاني: من الساعة 1:00 الليل حتى 1:30 الليل (كل 10 دقائق)
+scheduler.add_job(send_random_clip, 'cron', hour=1, minute='0,10,20,30')
+
 scheduler.start()
 
 if __name__ == "__main__":
@@ -155,7 +155,6 @@ if __name__ == "__main__":
     except: 
         pass
     
-    # تشغيل مستشعر البوت في خلفية النظامอย่าง آمن
     threading.Thread(target=lambda: bot.infinity_polling(allowed_updates=['channel_post', 'message']), daemon=True).start()
     
     port = int(os.environ.get("PORT", 10000))
