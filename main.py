@@ -94,7 +94,7 @@ def check_db(message):
     except Exception as e:
         bot.reply_to(message, f"⚠️ خطأ أثناء قراءة الذاكرة: {e}")
 
-# 🚀 دالة النشر العشوائي الذكي (من أول أو وسط أو آخر القناة بدون تكرار)
+# 🚀 دالة النشر العشوائي الذكي
 def send_random_clip():
     with db_lock:
         try:
@@ -138,14 +138,17 @@ def send_random_clip():
 def home():
     return "البوت يعمل بأعلى كفاءة واستقرار 🚀"
 
-# ⏰ المجدول المطور (يعمل من الساعة 12 الليل إلى 1:30 الليل كل 10 دقائق بتوقيت الرياض)
+# ⏰ المجدول (تم التعديل ليعمل من الساعة 12 الليل إلى 2 الليل كل 10 دقائق بالملي)
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
 
-# الجزء الأول: من الساعة 12:00 الليل حتى 12:50 الليل (كل 10 دقائق)
-scheduler.add_job(send_random_clip, 'cron', hour=0, minute='*/10')
+# من الساعة 12:00 الليل حتى 12:50 الليل (كل 10 دقائق)
+scheduler.add_job(send_random_clip, 'cron', hour=0, minute='*/10', misfire_grace_time=600, max_instances=3)
 
-# الجزء الثاني: من الساعة 1:00 الليل حتى 1:30 الليل (كل 10 دقائق)
-scheduler.add_job(send_random_clip, 'cron', hour=1, minute='0,10,20,30')
+# من الساعة 1:00 الليل حتى 1:50 الليل (كل 10 دقائق)
+scheduler.add_job(send_random_clip, 'cron', hour=1, minute='*/10', misfire_grace_time=600, max_instances=3)
+
+# الختام عند الساعة 2:00 الليل بالضبط
+scheduler.add_job(send_random_clip, 'cron', hour=2, minute=0, misfire_grace_time=600, max_instances=3)
 
 scheduler.start()
 
