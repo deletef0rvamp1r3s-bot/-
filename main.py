@@ -5,9 +5,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import os
 import json
 import threading
+import io  # 🆕 مكتبة جديدة للتعامل مع الملفات وهمياً لتخطي حد الحروف
 
 # 1. 🔑 توكن البوت الخاص بك
-BOT_TOKEN = "8990766814:AAHPmqRUG3sE2BHTJRmLOVoYmuqj4_rXOBw"
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8990766814:AAFkBVgclsqpHJHYkFu25SHdnCVuDWNG50g")
 bot = telebot.TeleBot(BOT_TOKEN)
 
 app = Flask(__name__)
@@ -16,7 +17,7 @@ app = Flask(__name__)
 PRIVATE_CHANNEL = -1004495050725
 PUBLIC_CHANNEL = -1004102734458
 
-# 📦 الـ 43 مقطع الأساسية الخاصة بك (مستخرجة من صورتك لحمايتها للأبد)
+# 📦 الـ 43 مقطع الأساسية الخاصة بك
 INITIAL_POSTS = [
     {"ids": [499, 500], "media_group_id": None}, {"ids": [501, 502], "media_group_id": None},
     {"ids": [503, 504], "media_group_id": None}, {"ids": [505, 506], "media_group_id": None},
@@ -44,38 +45,68 @@ INITIAL_POSTS = [
 
 db_lock = threading.Lock()
 
-# 🔄 دالتان ذكيتان لجلب وحفظ البيانات عبر الرسائل المثبتة في قناتك الخاصة مباشرة
+# 🔄 1. جلب البيانات من الملف المثبت (أو النص القديم للتحويل التلقائي)
 def get_cloud_db():
     try:
         chat = bot.get_chat(PRIVATE_CHANNEL)
-        if chat.pinned_message and chat.pinned_message.text and '{"posts":' in chat.pinned_message.text:
-            return json.loads(chat.pinned_message.text), chat.pinned_message.message_id
+        pinned_msg = chat.pinned_message
+        
+        if pinned_msg:
+            # إذا كان النظام الجديد (ملف)
+            if pinned_msg.document:
+                file_info = bot.get_file(pinned_msg.document.file_id)
+                downloaded_file = bot.download_file(file_info.file_path)
+                return json.loads(downloaded_file), pinned_msg.message_id
+            
+            # إذا كان النظام القديم (نص) لسحب البيانات بسلاسة أول مرة
+            elif pinned_msg.text and '{"posts":' in pinned_msg.text:
+                return json.loads(pinned_msg.text), pinned_msg.message_id
+                
     except Exception as e:
         print(f"⚠️ تنبيه أثناء جلب الذاكرة السحابية: {e}")
+        
     return {"posts": INITIAL_POSTS, "history": []}, None
 
-def save_cloud_db(db_data, msg_id):
-    text_data = json.dumps(db_data)
+# 🔄 2. حفظ البيانات على شكل ملف بدل النص لتفادي حد الـ 4096 حرف
+def save_cloud_db(db_data, old_msg_id):
     try:
-        if msg_id:
-            bot.edit_message_text(chat_id=PRIVATE_CHANNEL, message_id=msg_id, text=text_data)
-        else:
-            chat = bot.get_chat(PRIVATE_CHANNEL)
-            if chat.pinned_message and chat.pinned_message.text and '{"posts":' in chat.pinned_message.text:
-                bot.edit_message_text(chat_id=PRIVATE_CHANNEL, message_id=chat.pinned_message.message_id, text=text_data)
-            else:
-                msg = bot.send_message(chat_id=PRIVATE_CHANNEL, text=text_data)
-                bot.pin_chat_message(chat_id=PRIVATE_CHANNEL, message_id=msg.message_id, disable_notification=True)
+        # تحويل البيانات إلى نص ثم إلى ملف وهمي
+        json_str = json.dumps(db_data, indent=2)
+        file_stream = io.BytesIO(json_str.encode('utf-8'))
+        file_stream.name = 'database.json'
+        
+        # إرسال الملف الجديد للقناة
+        msg = bot.send_document(
+            chat_id=PRIVATE_CHANNEL, 
+            document=file_stream, 
+            caption="📦 قاعدة البيانات السحابية (نظام الملفات)"
+        )
+        
+        # تثبيت الملف الجديد بصمت
+        bot.pin_chat_message(chat_id=PRIVATE_CHANNEL, message_id=msg.message_id, disable_notification=True)
+        
+        # حذف الرسالة القديمة (نصية أو ملف) لكي لا تمتلئ القناة
+        if old_msg_id:
+            try:
+                bot.delete_message(chat_id=PRIVATE_CHANNEL, message_id=old_msg_id)
+            except Exception as e:
+                pass # تجاهل الخطأ إذا تعذر الحذف
+                
     except Exception as e:
-        print(f"❌ خطأ أثناء حفظ الذاكرة السحابية: {e}")
+        print(f"❌ خطأ أثناء حفظ قاعدة البيانات: {e}")
 
-# 📡 مستشعر ذكي وسحابي (يستقبل ويحفظ الجديد فوراً وبشكل دائم)
+# 📡 مستشعر ذكي وسحابي (يستقبل ويحفظ الجديد فوراً)
 @bot.channel_post_handler(content_types=['text', 'photo', 'video', 'animation', 'document', 'audio', 'voice'])
 def auto_save_posts(message):
     if message.chat.id != PRIVATE_CHANNEL:
         return
+        
+    # تجاهل ملف قاعدة البيانات نفسه
+    if message.document and message.document.file_name == 'database.json':
+        return
+    # تجاهل رسالة قاعدة البيانات النصية القديمة
     if message.text and message.text.startswith('{"posts":'):
-        return  # تجاهل رسالة قاعدة البيانات نفسها منعاً للتداخل
+        return  
 
     with db_lock:
         db_data, msg_id = get_cloud_db()
@@ -103,17 +134,17 @@ def auto_save_posts(message):
         db_data["posts"] = data
         save_cloud_db(db_data, msg_id)
 
-# 🛠️ أمر فحص الذاكرة (يقرأ مباشرة من السحابة ليعطيك الأرقام الحقيقية)
+# 🛠️ أمر فحص الذاكرة
 @bot.message_handler(commands=['db'])
 def check_db(message):
     try:
         db_data, _ = get_cloud_db()
         simplified_data = [block["ids"] for block in db_data.get("posts", [])]
-        bot.reply_to(message, f"📂 إجمالي المنشورات المحفوظة سحابياً: {len(simplified_data)}\nمحتوى الذاكرة الحالية:\n{simplified_data}")
+        bot.reply_to(message, f"📂 إجمالي المنشورات: {len(simplified_data)}\nالنظام المستخدم: نظام الملفات (بلا حدود) 🚀")
     except Exception as e:
         bot.reply_to(message, f"⚠️ خطأ: {e}")
 
-# 🚀 دالة النشر العشوائي السحابي الدقيق
+# 🚀 دالة النشر العشوائي السحابي
 def send_random_clip():
     with db_lock:
         db_data, msg_id = get_cloud_db()
@@ -147,22 +178,22 @@ def send_random_clip():
 
 @app.route('/')
 def home():
-    return "قاعدة البيانات السحابية تعمل بنجاح واستقرار أزلي 🚀"
+    return "قاعدة البيانات السحابية (نظام الملفات) تعمل بنجاح واستقرار أزلي 🚀"
 
-# ⏰ المجدول الدقيق (من الساعة 12 الليل إلى 2 الليل كل 10 دقائق بتوقيت الرياض)
+# ⏰ المجدول الدقيق (من الساعة 12 الليل إلى 2 الليل كل 7 دقائق)
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
-scheduler.add_job(send_random_clip, 'cron', hour=0, minute='*/10', misfire_grace_time=600, max_instances=3)
-scheduler.add_job(send_random_clip, 'cron', hour=1, minute='*/10', misfire_grace_time=600, max_instances=3)
+scheduler.add_job(send_random_clip, 'cron', hour=0, minute='*/7', misfire_grace_time=600, max_instances=3)
+scheduler.add_job(send_random_clip, 'cron', hour=1, minute='*/7', misfire_grace_time=600, max_instances=3)
 scheduler.add_job(send_random_clip, 'cron', hour=2, minute=0, misfire_grace_time=600, max_instances=3)
 scheduler.start()
 
 if __name__ == "__main__":
     try: 
         bot.remove_webhook()
-    except: 
+    except Exception as e: 
         pass
     
-    threading.Thread(target=lambda: bot.infinity_polling(allowed_updates=['channel_post', 'message']), daemon=True).start()
+    threading.Thread(target=lambda: bot.infinity_polling(allowed_updates=['channel_post', 'message'], skip_pending=True), daemon=True).start()
     
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, use_reloader=False, debug=False)
