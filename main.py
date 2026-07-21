@@ -8,7 +8,7 @@ import threading
 import io  # 🆕 مكتبة جديدة للتعامل مع الملفات وهمياً لتخطي حد الحروف
 
 # 1. 🔑 توكن البوت الخاص بك
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8990766814:AAFkBVgclsqpHJHYkFu25SHdnCVuDWNG50g")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8990766814:AAFom2ZDjJLvpN7w3x1pRUF2r3-qcHIhj9A")
 bot = telebot.TeleBot(BOT_TOKEN)
 
 app = Flask(__name__)
