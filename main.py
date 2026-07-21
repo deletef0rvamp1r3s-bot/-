@@ -5,10 +5,13 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import os
 import json
 import threading
-import io  # 🆕 مكتبة جديدة للتعامل مع الملفات وهمياً لتخطي حد الحروف
+import io
 
-# 1. 🔑 توكن البوت الخاص بك
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8990766814:AAFom2ZDjJLvpN7w3x1pRUF2r3-qcHIhj9A")
+# 1. 🔑 توكن البوت بأمان تام عبر متغيرات البيئة (Render Environment Variables)
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("⚠️ تحذير: يرجى إضافة BOT_TOKEN في متغيرات البيئة على المنصة!")
+
 bot = telebot.TeleBot(BOT_TOKEN)
 
 app = Flask(__name__)
@@ -45,66 +48,55 @@ INITIAL_POSTS = [
 
 db_lock = threading.Lock()
 
-# 🔄 1. جلب البيانات من الملف المثبت (أو النص القديم للتحويل التلقائي)
+# 🔄 1. جلب البيانات من الملف المثبت
 def get_cloud_db():
     try:
         chat = bot.get_chat(PRIVATE_CHANNEL)
         pinned_msg = chat.pinned_message
         
         if pinned_msg:
-            # إذا كان النظام الجديد (ملف)
             if pinned_msg.document:
                 file_info = bot.get_file(pinned_msg.document.file_id)
                 downloaded_file = bot.download_file(file_info.file_path)
                 return json.loads(downloaded_file), pinned_msg.message_id
-            
-            # إذا كان النظام القديم (نص) لسحب البيانات بسلاسة أول مرة
             elif pinned_msg.text and '{"posts":' in pinned_msg.text:
                 return json.loads(pinned_msg.text), pinned_msg.message_id
-                
     except Exception as e:
         print(f"⚠️ تنبيه أثناء جلب الذاكرة السحابية: {e}")
         
     return {"posts": INITIAL_POSTS, "history": []}, None
 
-# 🔄 2. حفظ البيانات على شكل ملف بدل النص لتفادي حد الـ 4096 حرف
+# 🔄 2. حفظ البيانات على شكل ملف
 def save_cloud_db(db_data, old_msg_id):
     try:
-        # تحويل البيانات إلى نص ثم إلى ملف وهمي
         json_str = json.dumps(db_data, indent=2)
         file_stream = io.BytesIO(json_str.encode('utf-8'))
         file_stream.name = 'database.json'
         
-        # إرسال الملف الجديد للقناة
         msg = bot.send_document(
             chat_id=PRIVATE_CHANNEL, 
             document=file_stream, 
             caption="📦 قاعدة البيانات السحابية (نظام الملفات)"
         )
         
-        # تثبيت الملف الجديد بصمت
         bot.pin_chat_message(chat_id=PRIVATE_CHANNEL, message_id=msg.message_id, disable_notification=True)
         
-        # حذف الرسالة القديمة (نصية أو ملف) لكي لا تمتلئ القناة
         if old_msg_id:
             try:
                 bot.delete_message(chat_id=PRIVATE_CHANNEL, message_id=old_msg_id)
-            except Exception as e:
-                pass # تجاهل الخطأ إذا تعذر الحذف
-                
+            except Exception:
+                pass
     except Exception as e:
         print(f"❌ خطأ أثناء حفظ قاعدة البيانات: {e}")
 
-# 📡 مستشعر ذكي وسحابي (يستقبل ويحفظ الجديد فوراً)
+# 📡 مستشعر ذكي وسحابي
 @bot.channel_post_handler(content_types=['text', 'photo', 'video', 'animation', 'document', 'audio', 'voice'])
 def auto_save_posts(message):
     if message.chat.id != PRIVATE_CHANNEL:
         return
         
-    # تجاهل ملف قاعدة البيانات نفسه
     if message.document and message.document.file_name == 'database.json':
         return
-    # تجاهل رسالة قاعدة البيانات النصية القديمة
     if message.text and message.text.startswith('{"posts":'):
         return  
 
@@ -157,7 +149,7 @@ def send_random_clip():
     available = [b for b in all_blocks if b["ids"] not in history]
     
     if not available:
-        print("🔄 تم نشر جميع المقاطع، جاري إعادة تصفير السجل سحابياً للبدء من جديد...")
+        print("🔄 تم نشر جميع المقاطع، جاري إعادة تصفير السجل سحابياً...")
         history = []
         available = all_blocks
 
@@ -180,7 +172,7 @@ def send_random_clip():
 def home():
     return "قاعدة البيانات السحابية (نظام الملفات) تعمل بنجاح واستقرار أزلي 🚀"
 
-# ⏰ المجدول الدقيق (من الساعة 12 الليل إلى 2 الليل كل 7 دقائق)
+# ⏰ المجدول الدقيق
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
 scheduler.add_job(send_random_clip, 'cron', hour=0, minute='*/7', misfire_grace_time=600, max_instances=3)
 scheduler.add_job(send_random_clip, 'cron', hour=1, minute='*/7', misfire_grace_time=600, max_instances=3)
@@ -190,7 +182,7 @@ scheduler.start()
 if __name__ == "__main__":
     try: 
         bot.remove_webhook()
-    except Exception as e: 
+    except Exception: 
         pass
     
     threading.Thread(target=lambda: bot.infinity_polling(allowed_updates=['channel_post', 'message'], skip_pending=True), daemon=True).start()
