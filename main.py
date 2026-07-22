@@ -1,6 +1,7 @@
 import telebot
+from telebot import apihelper # 👈 ضرورية لمنع التعليق
 import random
-import time  # 👈 تمت إضافته للتعامل مع وقت الانتظار بين المحاولات
+import time
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
 import os
@@ -12,6 +13,10 @@ import io
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("⚠️ تحذير: يرجى إضافة BOT_TOKEN في متغيرات البيئة على المنصة!")
+
+# 👇 حماية البوت من تعليق سيرفرات تليجرام (يفصل المحاولة لو تأخرت أكثر من 20 ثانية)
+apihelper.READ_TIMEOUT = 20
+apihelper.CONNECT_TIMEOUT = 20
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -49,7 +54,7 @@ INITIAL_POSTS = [
 
 db_lock = threading.Lock()
 
-# 🔄 1. جلب البيانات
+# 🔄 1. جلب البيانات من الرسالة المثبتة
 def get_cloud_db():
     try:
         chat = bot.get_chat(PRIVATE_CHANNEL)
@@ -67,21 +72,24 @@ def get_cloud_db():
         
     return {"posts": INITIAL_POSTS, "history": []}, None
 
-# 🔄 2. حفظ البيانات
+# 🔄 2. حفظ البيانات وتثبيتها في القناة
 def save_cloud_db(db_data, old_msg_id):
     try:
         json_str = json.dumps(db_data, indent=2)
         file_stream = io.BytesIO(json_str.encode('utf-8'))
         file_stream.name = 'database.json'
         
+        # إرسال الملف للقناة
         msg = bot.send_document(
             chat_id=PRIVATE_CHANNEL, 
             document=file_stream, 
             caption="📦 قاعدة البيانات السحابية (نظام الملفات)"
         )
         
+        # 📌 تثبيت رسالة الداتا بيس بصمت
         bot.pin_chat_message(chat_id=PRIVATE_CHANNEL, message_id=msg.message_id, disable_notification=True)
         
+        # حذف الملف القديم لعدم الإزعاج
         if old_msg_id:
             try:
                 bot.delete_message(chat_id=PRIVATE_CHANNEL, message_id=old_msg_id)
@@ -90,7 +98,7 @@ def save_cloud_db(db_data, old_msg_id):
     except Exception as e:
         print(f"❌ خطأ أثناء حفظ قاعدة البيانات: {e}")
 
-# 📡 مستشعر الحفظ التلقائي
+# 📡 مستشعر الحفظ التلقائي (محمي من التعليق)
 @bot.channel_post_handler(content_types=['text', 'photo', 'video', 'animation', 'document', 'audio', 'voice'])
 def auto_save_posts(message):
     if message.chat.id != PRIVATE_CHANNEL:
@@ -101,7 +109,11 @@ def auto_save_posts(message):
     if message.text and message.text.startswith('{"posts":'):
         return  
 
-    with db_lock:
+    if not db_lock.acquire(timeout=15):
+        print("⚠️ تعذر حفظ المقطع التلقائي الآن لتجنب التعليق.")
+        return
+        
+    try:
         db_data, msg_id = get_cloud_db()
         data = db_data.get("posts", [])
 
@@ -126,6 +138,8 @@ def auto_save_posts(message):
 
         db_data["posts"] = data
         save_cloud_db(db_data, msg_id)
+    finally:
+        db_lock.release()
 
 # 🛠️ أمر فحص الذاكرة
 @bot.message_handler(commands=['db'])
@@ -137,19 +151,26 @@ def check_db(message):
     except Exception as e:
         bot.reply_to(message, f"⚠️ خطأ: {e}")
 
-# 🚀 دالة النشر العشوائي السحابي (معدلة لمنع التخطي)
+# 🚀 دالة النشر العشوائي السحابي (محمية وعشوائية 100%)
 def send_random_clip():
-    with db_lock:
+    if not db_lock.acquire(timeout=15):
+        print("⚠️ القفل مشغول، سيتم تخطي هذه الدورة لتجنب تعليق البوت.")
+        return
+        
+    try:
         db_data, msg_id = get_cloud_db()
         all_blocks = db_data.get("posts", [])
         history = db_data.get("history", [])
+    finally:
+        db_lock.release() 
 
     if not all_blocks: 
         return
     
-    max_retries = 5  # 👈 البوت بيحاول 5 مرات يختار مقطع سليم لو طاح بمقطع محذوف
+    max_retries = 5  
     
     for attempt in range(max_retries):
+        # فلترة المقاطع التي لم تُنشر بعد
         available = [b for b in all_blocks if b["ids"] not in history]
         
         if not available:
@@ -157,6 +178,7 @@ def send_random_clip():
             history = []
             available = all_blocks
 
+        # 🎲 هنا يتم الاختيار العشوائي التام (لا يهم إن كان المقطع بأول القناة أو آخرها)
         selected_block = random.choice(available)
         selected_ids = selected_block["ids"]
         
@@ -164,25 +186,29 @@ def send_random_clip():
             bot.copy_messages(chat_id=PUBLIC_CHANNEL, from_chat_id=PRIVATE_CHANNEL, message_ids=selected_ids)
             print(f"✅ تم النشر العشوائي بنجاح للكتلة: {selected_ids}")
             
-            # إذا تم النشر بنجاح، نحفظه في السجل ونقفل حلقة التكرار
             history.append(selected_ids)
             db_data["history"] = history
-            with db_lock:
-                save_cloud_db(db_data, msg_id)
-            break  # الخروج من المحاولات لأن النشر نجح
+            
+            if db_lock.acquire(timeout=15):
+                try:
+                    save_cloud_db(db_data, msg_id)
+                finally:
+                    db_lock.release()
+            break  
             
         except Exception as e:
-            print(f"❌ حدث خطأ أثناء النشر للكتلة {selected_ids} (محاولة {attempt+1}): {e}")
-            
-            # إذا كان الخطأ بسبب أن المقطع محذوف، نسجله كأنه "نُشر" عشان ما يختاره البوت مرة ثانية
+            print(f"❌ حدث خطأ أثناء النشر (محاولة {attempt+1}): {e}")
             error_text = str(e).lower()
             if "not found" in error_text or "message to copy" in error_text:
                 history.append(selected_ids)
                 db_data["history"] = history
-                with db_lock:
-                    save_cloud_db(db_data, msg_id)
+                if db_lock.acquire(timeout=15):
+                    try:
+                        save_cloud_db(db_data, msg_id)
+                    finally:
+                        db_lock.release()
             
-            time.sleep(3) # 👈 ننتظر 3 ثواني قبل المحاولة اللي بعدها عشان تليجرام ما يحظرنا
+            time.sleep(3) 
     else:
         print("⚠️ فشلت جميع المحاولات لنشر مقطع في هذا الوقت.")
 
@@ -190,7 +216,7 @@ def send_random_clip():
 def home():
     return "قاعدة البيانات السحابية تعمل بنجاح 🚀"
 
-# ⏰ المجدول
+# ⏰ المجدول (كما هو تماماً ليتوقف بعد الساعة 2 صباحاً)
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
 scheduler.add_job(send_random_clip, 'cron', hour=0, minute='*/7', misfire_grace_time=600, max_instances=3)
 scheduler.add_job(send_random_clip, 'cron', hour=1, minute='*/7', misfire_grace_time=600, max_instances=3)
