@@ -1,5 +1,6 @@
 import telebot
 import random
+import time  # 👈 تمت إضافته للتعامل مع وقت الانتظار بين المحاولات
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
 import os
@@ -7,7 +8,7 @@ import json
 import threading
 import io
 
-# 1. 🔑 توكن البوت بأمان تام عبر متغيرات البيئة (Render Environment Variables)
+# 1. 🔑 توكن البوت
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("⚠️ تحذير: يرجى إضافة BOT_TOKEN في متغيرات البيئة على المنصة!")
@@ -48,7 +49,7 @@ INITIAL_POSTS = [
 
 db_lock = threading.Lock()
 
-# 🔄 1. جلب البيانات من الملف المثبت
+# 🔄 1. جلب البيانات
 def get_cloud_db():
     try:
         chat = bot.get_chat(PRIVATE_CHANNEL)
@@ -62,11 +63,11 @@ def get_cloud_db():
             elif pinned_msg.text and '{"posts":' in pinned_msg.text:
                 return json.loads(pinned_msg.text), pinned_msg.message_id
     except Exception as e:
-        print(f"⚠️ تنبيه أثناء جلب الذاكرة السحابية: {e}")
+        print(f"⚠️ تنبيه أثناء جلب الذاكرة: {e}")
         
     return {"posts": INITIAL_POSTS, "history": []}, None
 
-# 🔄 2. حفظ البيانات على شكل ملف
+# 🔄 2. حفظ البيانات
 def save_cloud_db(db_data, old_msg_id):
     try:
         json_str = json.dumps(db_data, indent=2)
@@ -89,7 +90,7 @@ def save_cloud_db(db_data, old_msg_id):
     except Exception as e:
         print(f"❌ خطأ أثناء حفظ قاعدة البيانات: {e}")
 
-# 📡 مستشعر ذكي وسحابي
+# 📡 مستشعر الحفظ التلقائي
 @bot.channel_post_handler(content_types=['text', 'photo', 'video', 'animation', 'document', 'audio', 'voice'])
 def auto_save_posts(message):
     if message.chat.id != PRIVATE_CHANNEL:
@@ -136,7 +137,7 @@ def check_db(message):
     except Exception as e:
         bot.reply_to(message, f"⚠️ خطأ: {e}")
 
-# 🚀 دالة النشر العشوائي السحابي
+# 🚀 دالة النشر العشوائي السحابي (معدلة لمنع التخطي)
 def send_random_clip():
     with db_lock:
         db_data, msg_id = get_cloud_db()
@@ -146,33 +147,50 @@ def send_random_clip():
     if not all_blocks: 
         return
     
-    available = [b for b in all_blocks if b["ids"] not in history]
+    max_retries = 5  # 👈 البوت بيحاول 5 مرات يختار مقطع سليم لو طاح بمقطع محذوف
     
-    if not available:
-        print("🔄 تم نشر جميع المقاطع، جاري إعادة تصفير السجل سحابياً...")
-        history = []
-        available = all_blocks
+    for attempt in range(max_retries):
+        available = [b for b in all_blocks if b["ids"] not in history]
+        
+        if not available:
+            print("🔄 تم نشر جميع المقاطع، جاري إعادة تصفير السجل سحابياً...")
+            history = []
+            available = all_blocks
 
-    selected_block = random.choice(available)
-    selected_ids = selected_block["ids"]
-    
-    try:
-        bot.copy_messages(chat_id=PUBLIC_CHANNEL, from_chat_id=PRIVATE_CHANNEL, message_ids=selected_ids)
-        print(f"✅ تم النشر العشوائي بنجاح للكتلة: {selected_ids}")
+        selected_block = random.choice(available)
+        selected_ids = selected_block["ids"]
         
-        history.append(selected_ids)
-        db_data["history"] = history
-        
-        with db_lock:
-            save_cloud_db(db_data, msg_id)
-    except Exception as e:
-        print(f"❌ حدث خطأ أثناء النشر: {e}")
+        try:
+            bot.copy_messages(chat_id=PUBLIC_CHANNEL, from_chat_id=PRIVATE_CHANNEL, message_ids=selected_ids)
+            print(f"✅ تم النشر العشوائي بنجاح للكتلة: {selected_ids}")
+            
+            # إذا تم النشر بنجاح، نحفظه في السجل ونقفل حلقة التكرار
+            history.append(selected_ids)
+            db_data["history"] = history
+            with db_lock:
+                save_cloud_db(db_data, msg_id)
+            break  # الخروج من المحاولات لأن النشر نجح
+            
+        except Exception as e:
+            print(f"❌ حدث خطأ أثناء النشر للكتلة {selected_ids} (محاولة {attempt+1}): {e}")
+            
+            # إذا كان الخطأ بسبب أن المقطع محذوف، نسجله كأنه "نُشر" عشان ما يختاره البوت مرة ثانية
+            error_text = str(e).lower()
+            if "not found" in error_text or "message to copy" in error_text:
+                history.append(selected_ids)
+                db_data["history"] = history
+                with db_lock:
+                    save_cloud_db(db_data, msg_id)
+            
+            time.sleep(3) # 👈 ننتظر 3 ثواني قبل المحاولة اللي بعدها عشان تليجرام ما يحظرنا
+    else:
+        print("⚠️ فشلت جميع المحاولات لنشر مقطع في هذا الوقت.")
 
 @app.route('/')
 def home():
-    return "قاعدة البيانات السحابية (نظام الملفات) تعمل بنجاح واستقرار أزلي 🚀"
+    return "قاعدة البيانات السحابية تعمل بنجاح 🚀"
 
-# ⏰ المجدول الدقيق
+# ⏰ المجدول
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
 scheduler.add_job(send_random_clip, 'cron', hour=0, minute='*/7', misfire_grace_time=600, max_instances=3)
 scheduler.add_job(send_random_clip, 'cron', hour=1, minute='*/7', misfire_grace_time=600, max_instances=3)
