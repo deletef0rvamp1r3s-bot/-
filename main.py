@@ -8,6 +8,8 @@ import os
 import json
 import threading
 import io
+import pytz # 👈 تمت إضافة مكتبة التوقيت
+from datetime import datetime # 👈 تمت إضافتها لفحص الوقت
 
 # 1. 🔑 توكن البوت
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -150,6 +152,22 @@ def check_db(message):
         bot.reply_to(message, f"📂 إجمالي المنشورات: {len(simplified_data)}\nالنظام المستخدم: نظام الملفات (بلا حدود) 🚀")
     except Exception as e:
         bot.reply_to(message, f"⚠️ خطأ: {e}")
+
+# 🛠️ أمر فحص الوقت (للتأكد أن البوت يقرأ توقيت السعودية صح)
+@bot.message_handler(commands=['time'])
+def check_time(message):
+    try:
+        saudi_tz = pytz.timezone("Asia/Riyadh")
+        saudi_time = datetime.now(saudi_tz).strftime("%Y-%m-%d %H:%M:%S")
+        bot.reply_to(message, f"🕒 الوقت الحالي في عقل البوت (توقيت السعودية) هو:\n{saudi_time}")
+    except Exception as e:
+        bot.reply_to(message, f"⚠️ خطأ أثناء قراءة الوقت: {e}")
+
+# 🛠️ أمر لاختبار النشر يدوياً (للتأكد أن الصلاحيات سليمة)
+@bot.message_handler(commands=['test'])
+def manual_test_post(message):
+    bot.reply_to(message, "⏳ جاري محاولة نشر مقطع عشوائي الآن لاختبار الكود...")
+    threading.Thread(target=send_random_clip).start()
 
 # 🚀 دالة النشر العشوائي السحابي (محمية وعشوائية 100%)
 def send_random_clip():
