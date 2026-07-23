@@ -1,5 +1,5 @@
 import telebot
-from telebot import apihelper # 👈 ضرورية لمنع التعليق
+from telebot import apihelper
 import random
 import time
 from flask import Flask
@@ -8,15 +8,15 @@ import os
 import json
 import threading
 import io
-import pytz # 👈 تمت إضافة مكتبة التوقيت
-from datetime import datetime # 👈 تمت إضافتها لفحص الوقت
+import pytz
+from datetime import datetime
 
 # 1. 🔑 توكن البوت
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("⚠️ تحذير: يرجى إضافة BOT_TOKEN في متغيرات البيئة على المنصة!")
 
-# 👇 حماية البوت من تعليق سيرفرات تليجرام (يفصل المحاولة لو تأخرت أكثر من 20 ثانية)
+# 👇 حماية البوت من تعليق سيرفرات تليجرام
 apihelper.READ_TIMEOUT = 20
 apihelper.CONNECT_TIMEOUT = 20
 
@@ -28,35 +28,9 @@ app = Flask(__name__)
 PRIVATE_CHANNEL = -1004495050725
 PUBLIC_CHANNEL = -1004102734458
 
-# 📦 الـ 43 مقطع الأساسية الخاصة بك
-INITIAL_POSTS = [
-    {"ids": [499, 500], "media_group_id": None}, {"ids": [501, 502], "media_group_id": None},
-    {"ids": [503, 504], "media_group_id": None}, {"ids": [505, 506], "media_group_id": None},
-    {"ids": [507, 508, 509], "media_group_id": None}, {"ids": [510, 511], "media_group_id": None},
-    {"ids": [512, 513], "media_group_id": None}, {"ids": [514, 516, 515], "media_group_id": None},
-    {"ids": [517, 518], "media_group_id": None}, {"ids": [519, 520], "media_group_id": None},
-    {"ids": [521, 522, 523], "media_group_id": None}, {"ids": [524, 525], "media_group_id": None},
-    {"ids": [526, 527], "media_group_id": None}, {"ids": [528, 530, 529, 531], "media_group_id": None},
-    {"ids": [532, 533], "media_group_id": None}, {"ids": [534, 535], "media_group_id": None},
-    {"ids": [536, 537], "media_group_id": None}, {"ids": [538, 539, 540, 541], "media_group_id": None},
-    {"ids": [542, 543], "media_group_id": None}, {"ids": [544, 545], "media_group_id": None},
-    {"ids": [546, 547], "media_group_id": None}, {"ids": [548, 549], "media_group_id": None},
-    {"ids": [550, 551], "media_group_id": None}, {"ids": [552, 554, 553, 555], "media_group_id": None},
-    {"ids": [556, 557], "media_group_id": None}, {"ids": [558, 560, 559, 561, 562], "media_group_id": None},
-    {"ids": [563, 564], "media_group_id": None}, {"ids": [565, 567, 566, 568], "media_group_id": None},
-    {"ids": [569, 570, 572, 571, 574, 573, 575], "media_group_id": None}, {"ids": [576, 577], "media_group_id": None},
-    {"ids": [578, 579], "media_group_id": None}, {"ids": [580, 581, 582, 583], "media_group_id": None},
-    {"ids": [584, 585, 586], "media_group_id": None}, {"ids": [587, 588], "media_group_id": None},
-    {"ids": [589, 590], "media_group_id": None}, {"ids": [591, 592, 593, 594], "media_group_id": None},
-    {"ids": [595, 596], "media_group_id": None}, {"ids": [597, 598], "media_group_id": None},
-    {"ids": [599, 600, 601], "media_group_id": None}, {"ids": [602, 603], "media_group_id": None},
-    {"ids": [604, 605], "media_group_id": None}, {"ids": [606, 608, 607, 609], "media_group_id": None},
-    {"ids": [610, 611, 1840, 1841, 1842], "media_group_id": None}
-]
-
 db_lock = threading.Lock()
 
-# 🔄 1. جلب البيانات من الرسالة المثبتة
+# 🔄 1. جلب البيانات من القناة فقط (بدون أي تخزين داخل الكود)
 def get_cloud_db():
     try:
         chat = bot.get_chat(PRIVATE_CHANNEL)
@@ -70,9 +44,10 @@ def get_cloud_db():
             elif pinned_msg.text and '{"posts":' in pinned_msg.text:
                 return json.loads(pinned_msg.text), pinned_msg.message_id
     except Exception as e:
-        print(f"⚠️ تنبيه أثناء جلب الذاكرة: {e}")
+        print(f"⚠️ تنبيه أثناء جلب الذاكرة (قد لا يوجد ملف مثبت بعد): {e}")
         
-    return {"posts": INITIAL_POSTS, "history": []}, None
+    # إذا لم يجد ملف في القناة، يبدأ بقاعدة بيانات فارغة جديدة
+    return {"posts": [], "history": []}, None
 
 # 🔄 2. حفظ البيانات وتثبيتها في القناة
 def save_cloud_db(db_data, old_msg_id):
@@ -81,17 +56,14 @@ def save_cloud_db(db_data, old_msg_id):
         file_stream = io.BytesIO(json_str.encode('utf-8'))
         file_stream.name = 'database.json'
         
-        # إرسال الملف للقناة
         msg = bot.send_document(
             chat_id=PRIVATE_CHANNEL, 
             document=file_stream, 
             caption="📦 قاعدة البيانات السحابية (نظام الملفات)"
         )
         
-        # 📌 تثبيت رسالة الداتا بيس بصمت
         bot.pin_chat_message(chat_id=PRIVATE_CHANNEL, message_id=msg.message_id, disable_notification=True)
         
-        # حذف الملف القديم لعدم الإزعاج
         if old_msg_id:
             try:
                 bot.delete_message(chat_id=PRIVATE_CHANNEL, message_id=old_msg_id)
@@ -100,7 +72,7 @@ def save_cloud_db(db_data, old_msg_id):
     except Exception as e:
         print(f"❌ خطأ أثناء حفظ قاعدة البيانات: {e}")
 
-# 📡 مستشعر الحفظ التلقائي (محمي من التعليق)
+# 📡 مستشعر الحفظ التلقائي
 @bot.channel_post_handler(content_types=['text', 'photo', 'video', 'animation', 'document', 'audio', 'voice'])
 def auto_save_posts(message):
     if message.chat.id != PRIVATE_CHANNEL:
@@ -112,7 +84,6 @@ def auto_save_posts(message):
         return  
 
     if not db_lock.acquire(timeout=15):
-        print("⚠️ تعذر حفظ المقطع التلقائي الآن لتجنب التعليق.")
         return
         
     try:
@@ -149,11 +120,11 @@ def check_db(message):
     try:
         db_data, _ = get_cloud_db()
         simplified_data = [block["ids"] for block in db_data.get("posts", [])]
-        bot.reply_to(message, f"📂 إجمالي المنشورات: {len(simplified_data)}\nالنظام المستخدم: نظام الملفات (بلا حدود) 🚀")
+        bot.reply_to(message, f"📂 إجمالي المنشورات: {len(simplified_data)}\nالنظام المستخدم: الاعتماد الكلي على رسالة القناة 🚀")
     except Exception as e:
         bot.reply_to(message, f"⚠️ خطأ: {e}")
 
-# 🛠️ أمر فحص الوقت (للتأكد أن البوت يقرأ توقيت السعودية صح)
+# 🛠️ أمر فحص الوقت
 @bot.message_handler(commands=['time'])
 def check_time(message):
     try:
@@ -163,29 +134,28 @@ def check_time(message):
     except Exception as e:
         bot.reply_to(message, f"⚠️ خطأ أثناء قراءة الوقت: {e}")
 
-# 🛠️ أمر لاختبار النشر يدوياً وكشف سبب رفض تليجرام
+# 🛠️ أمر اختبار النشر 
 @bot.message_handler(commands=['test'])
 def manual_test_post(message):
-    bot.reply_to(message, "⏳ جاري محاولة النشر لمعرفة المشكلة بالضبط...")
+    bot.reply_to(message, "⏳ جاري محاولة النشر...")
     try:
         db_data, _ = get_cloud_db()
         all_blocks = db_data.get("posts", [])
         if not all_blocks:
-            bot.reply_to(message, "⚠️ لا توجد مقاطع في الذاكرة!")
+            bot.reply_to(message, "⚠️ قاعدة البيانات فارغة! قم بإرسال مقاطع للقناة الخاصة أولاً.")
             return
             
         selected_block = random.choice(all_blocks)
-        selected_ids = selected_block["ids"]
+        selected_ids = sorted(selected_block["ids"]) 
         
         bot.copy_messages(chat_id=PUBLIC_CHANNEL, from_chat_id=PRIVATE_CHANNEL, message_ids=selected_ids)
         bot.reply_to(message, f"✅ تم النشر بنجاح للكتلة: {selected_ids}")
     except Exception as e:
-        bot.reply_to(message, f"❌ تليجرام يرفض النشر!\nالسبب الدقيق للخطأ هو:\n\n{e}")
+        bot.reply_to(message, f"❌ تليجرام يرفض النشر!\nالسبب: {e}")
 
-# 🚀 دالة النشر العشوائي السحابي (محمية وعشوائية 100%)
+# 🚀 دالة النشر العشوائي للمجدول
 def send_random_clip():
     if not db_lock.acquire(timeout=15):
-        print("⚠️ القفل مشغول، سيتم تخطي هذه الدورة لتجنب تعليق البوت.")
         return
         
     try:
@@ -201,7 +171,6 @@ def send_random_clip():
     max_retries = 5  
     
     for attempt in range(max_retries):
-        # فلترة المقاطع التي لم تُنشر بعد
         available = [b for b in all_blocks if b["ids"] not in history]
         
         if not available:
@@ -209,15 +178,14 @@ def send_random_clip():
             history = []
             available = all_blocks
 
-        # 🎲 هنا يتم الاختيار العشوائي التام (لا يهم إن كان المقطع بأول القناة أو آخرها)
         selected_block = random.choice(available)
-        selected_ids = selected_block["ids"]
+        selected_ids = sorted(selected_block["ids"])
         
         try:
             bot.copy_messages(chat_id=PUBLIC_CHANNEL, from_chat_id=PRIVATE_CHANNEL, message_ids=selected_ids)
             print(f"✅ تم النشر العشوائي بنجاح للكتلة: {selected_ids}")
             
-            history.append(selected_ids)
+            history.append(selected_block["ids"]) 
             db_data["history"] = history
             
             if db_lock.acquire(timeout=15):
@@ -228,10 +196,10 @@ def send_random_clip():
             break  
             
         except Exception as e:
-            print(f"❌ حدث خطأ أثناء النشر (محاولة {attempt+1}): {e}")
+            print(f"❌ حدث خطأ أثناء النشر: {e}")
             error_text = str(e).lower()
             if "not found" in error_text or "message to copy" in error_text:
-                history.append(selected_ids)
+                history.append(selected_block["ids"])
                 db_data["history"] = history
                 if db_lock.acquire(timeout=15):
                     try:
@@ -240,14 +208,12 @@ def send_random_clip():
                         db_lock.release()
             
             time.sleep(3) 
-    else:
-        print("⚠️ فشلت جميع المحاولات لنشر مقطع في هذا الوقت.")
 
 @app.route('/')
 def home():
     return "قاعدة البيانات السحابية تعمل بنجاح 🚀"
 
-# ⏰ المجدول (كما هو تماماً ليتوقف بعد الساعة 2 صباحاً)
+# ⏰ المجدول (نشر كل 7 دقائق من 12 إلى 2 صباحاً)
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
 scheduler.add_job(send_random_clip, 'cron', hour=0, minute='*/7', misfire_grace_time=600, max_instances=3)
 scheduler.add_job(send_random_clip, 'cron', hour=1, minute='*/7', misfire_grace_time=600, max_instances=3)
