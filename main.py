@@ -163,11 +163,24 @@ def check_time(message):
     except Exception as e:
         bot.reply_to(message, f"⚠️ خطأ أثناء قراءة الوقت: {e}")
 
-# 🛠️ أمر لاختبار النشر يدوياً (للتأكد أن الصلاحيات سليمة)
+# 🛠️ أمر لاختبار النشر يدوياً وكشف سبب رفض تليجرام
 @bot.message_handler(commands=['test'])
 def manual_test_post(message):
-    bot.reply_to(message, "⏳ جاري محاولة نشر مقطع عشوائي الآن لاختبار الكود...")
-    threading.Thread(target=send_random_clip).start()
+    bot.reply_to(message, "⏳ جاري محاولة النشر لمعرفة المشكلة بالضبط...")
+    try:
+        db_data, _ = get_cloud_db()
+        all_blocks = db_data.get("posts", [])
+        if not all_blocks:
+            bot.reply_to(message, "⚠️ لا توجد مقاطع في الذاكرة!")
+            return
+            
+        selected_block = random.choice(all_blocks)
+        selected_ids = selected_block["ids"]
+        
+        bot.copy_messages(chat_id=PUBLIC_CHANNEL, from_chat_id=PRIVATE_CHANNEL, message_ids=selected_ids)
+        bot.reply_to(message, f"✅ تم النشر بنجاح للكتلة: {selected_ids}")
+    except Exception as e:
+        bot.reply_to(message, f"❌ تليجرام يرفض النشر!\nالسبب الدقيق للخطأ هو:\n\n{e}")
 
 # 🚀 دالة النشر العشوائي السحابي (محمية وعشوائية 100%)
 def send_random_clip():
