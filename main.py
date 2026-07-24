@@ -226,7 +226,8 @@ if __name__ == "__main__":
     except Exception: 
         pass
     
-    threading.Thread(target=lambda: bot.infinity_polling(allowed_updates=['channel_post', 'message'], skip_pending=True), daemon=True).start()
+    # 👇 هنا التعديل تم بنجاح: skip_pending=False
+    threading.Thread(target=lambda: bot.infinity_polling(allowed_updates=['channel_post', 'message'], skip_pending=False), daemon=True).start()
     
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, use_reloader=False, debug=False)
