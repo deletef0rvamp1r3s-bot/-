@@ -153,6 +153,31 @@ def manual_test_post(message):
     except Exception as e:
         bot.reply_to(message, f"❌ تليجرام يرفض النشر!\nالسبب: {e}")
 
+# 🛠️ أمر تصفير قاعدة البيانات السحابية (حذف كل شيء)
+@bot.message_handler(commands=['clear'])
+def clear_db_command(message):
+    bot.reply_to(message, "⏳ جاري تصفير قاعدة البيانات السحابية...")
+    
+    if not db_lock.acquire(timeout=15):
+        bot.reply_to(message, "⚠️ النظام مشغول حالياً، حاول مرة أخرى بعد قليل.")
+        return
+        
+    try:
+        # جلب الـ ID الخاص برسالة قاعدة البيانات القديمة لحذفها
+        _, msg_id = get_cloud_db()
+        
+        # إنشاء قاعدة بيانات فارغة تماماً
+        empty_db = {"posts": [], "history": []}
+        
+        # حفظ قاعدة البيانات الفارغة في القناة
+        save_cloud_db(empty_db, msg_id)
+        
+        bot.reply_to(message, "✅ تم تصفير التخزين السحابي بنجاح! قاعدة البيانات الآن فارغة.")
+    except Exception as e:
+        bot.reply_to(message, f"❌ حدث خطأ أثناء التصفير: {e}")
+    finally:
+        db_lock.release()
+
 # 🚀 دالة النشر العشوائي للمجدول
 def send_random_clip():
     if not db_lock.acquire(timeout=15):
@@ -213,11 +238,15 @@ def send_random_clip():
 def home():
     return "قاعدة البيانات السحابية تعمل بنجاح 🚀"
 
-# ⏰ المجدول (نشر كل 7 دقائق من 12 إلى 2 صباحاً)
+# ⏰ المجدول (نشر كل 7 دقائق من 12:00 إلى 1:10 صباحاً)
 scheduler = BackgroundScheduler(timezone="Asia/Riyadh")
+
+# ينشر في الساعة 12:00, 12:07, 12:14 ... وحتى 12:56
 scheduler.add_job(send_random_clip, 'cron', hour=0, minute='*/7', misfire_grace_time=600, max_instances=3)
-scheduler.add_job(send_random_clip, 'cron', hour=1, minute='*/7', misfire_grace_time=600, max_instances=3)
-scheduler.add_job(send_random_clip, 'cron', hour=2, minute=0, misfire_grace_time=600, max_instances=3)
+
+# ينشر في الساعة 1:00 و 1:07 فقط (يتوقف قبل 1:10 ولن ينشر في 1:14)
+scheduler.add_job(send_random_clip, 'cron', hour=1, minute='0,7', misfire_grace_time=600, max_instances=3)
+
 scheduler.start()
 
 if __name__ == "__main__":
