@@ -178,6 +178,56 @@ def clear_db_command(message):
     finally:
         db_lock.release()
 
+# 🛠️ أمر دمج عدة رسائل في كتلة واحدة (قوس واحد)
+@bot.message_handler(commands=['merge'])
+def merge_ids_command(message):
+    bot.reply_to(message, "⏳ جاري محاولة دمج الأرقام...")
+    try:
+        # أخذ الأرقام من رسالة المستخدم
+        args = message.text.split()[1:]
+        if len(args) < 2:
+            bot.reply_to(message, "⚠️ أرسل الأمر مع الأرقام اللي تبي تدمجها مسافة بين كل رقم، مثال:\n/merge 1456 1457 1458")
+            return
+
+        ids_to_merge = [int(x) for x in args]
+        
+        if not db_lock.acquire(timeout=15):
+            bot.reply_to(message, "⚠️ النظام مشغول حالياً، حاول مرة أخرى بعد قليل.")
+            return
+            
+        try:
+            db_data, msg_id = get_cloud_db()
+            posts = db_data.get("posts", [])
+            
+            new_posts = []
+            merged_ids = set()
+            
+            # البحث عن الأرقام وجمعها
+            for block in posts:
+                if any(target_id in block["ids"] for target_id in ids_to_merge):
+                    merged_ids.update(block["ids"])
+                else:
+                    new_posts.append(block)
+            
+            merged_ids.update(ids_to_merge) # التأكد من إضافة كل الأرقام المطلوبة
+            
+            # إنشاء القوس الجديد المدموج
+            new_posts.append({
+                "ids": sorted(list(merged_ids)),
+                "media_group_id": "merged_manually"
+            })
+            
+            db_data["posts"] = new_posts
+            save_cloud_db(db_data, msg_id)
+            
+            bot.reply_to(message, f"✅ تم الدمج بنجاح! الأرقام الآن في قوس واحد:\n{sorted(list(merged_ids))}")
+        finally:
+            db_lock.release()
+    except ValueError:
+        bot.reply_to(message, "❌ تأكد من كتابة الأرقام بشكل صحيح (أرقام فقط).")
+    except Exception as e:
+        bot.reply_to(message, f"❌ حدث خطأ أثناء الدمج: {e}")
+
 # 🚀 دالة النشر العشوائي للمجدول
 def send_random_clip():
     if not db_lock.acquire(timeout=15):
