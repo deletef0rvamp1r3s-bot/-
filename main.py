@@ -228,6 +228,70 @@ def merge_ids_command(message):
     except Exception as e:
         bot.reply_to(message, f"❌ حدث خطأ أثناء الدمج: {e}")
 
+# 🛠️ أمر حذف رقم معين أو عدة أرقام من قاعدة البيانات السحابية
+@bot.message_handler(commands=['del', 'remove'])
+def delete_id_command(message):
+    bot.reply_to(message, "⏳ جاري البحث ومحاولة الحذف...")
+    try:
+        # أخذ الأرقام من رسالة المستخدم
+        args = message.text.split()[1:]
+        if not args:
+            bot.reply_to(message, "⚠️ أرسل الأمر مع رقم الرسالة اللي تبي تحذفها، مثال:\n/del 1548\nأو لحذف عدة أرقام:\n/del 1548 1549")
+            return
+
+        ids_to_remove = [int(x) for x in args]
+        
+        if not db_lock.acquire(timeout=15):
+            bot.reply_to(message, "⚠️ النظام مشغول حالياً، حاول مرة أخرى بعد قليل.")
+            return
+            
+        try:
+            db_data, msg_id = get_cloud_db()
+            posts = db_data.get("posts", [])
+            history = db_data.get("history", [])
+            
+            new_posts = []
+            deleted_count = 0
+            
+            # 1. البحث في المنشورات وحذف الرقم
+            for block in posts:
+                original_len = len(block["ids"])
+                # تصفية الأرقام والاحتفاظ بالتي لا نريد حذفها
+                remaining_ids = [vid for vid in block["ids"] if vid not in ids_to_remove]
+                
+                # حساب كم رقم تم حذفه
+                if len(remaining_ids) < original_len:
+                    deleted_count += (original_len - len(remaining_ids))
+                
+                # إذا تبقى أرقام في القوس، نحتفظ به، وإذا أصبح فارغاً سيتم حذفه تلقائياً
+                if remaining_ids:
+                    block["ids"] = remaining_ids
+                    new_posts.append(block)
+
+            # 2. البحث في السجل (History) وحذف الرقم أيضاً لتفادي الأخطاء
+            new_history = []
+            for hist_block in history:
+                remaining_hist = [vid for vid in hist_block if vid not in ids_to_remove]
+                if remaining_hist:
+                    new_history.append(remaining_hist)
+            
+            if deleted_count > 0:
+                db_data["posts"] = new_posts
+                db_data["history"] = new_history
+                save_cloud_db(db_data, msg_id)
+                bot.reply_to(message, f"✅ تم حذف {deleted_count} رقم بنجاح من التخزين السحابي!")
+            else:
+                bot.reply_to(message, "⚠️ لم يتم العثور على هذه الأرقام في قاعدة البيانات.")
+                
+        finally:
+            db_lock.release()
+            
+    except ValueError:
+        bot.reply_to(message, "❌ تأكد من كتابة الأرقام بشكل صحيح (أرقام فقط دون مسافات زائدة).")
+    except Exception as e:
+        bot.reply_to(message, f"❌ حدث خطأ أثناء الحذف: {e}")
+
+
 # 🚀 دالة النشر العشوائي للمجدول
 def send_random_clip():
     if not db_lock.acquire(timeout=15):
