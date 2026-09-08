@@ -26,7 +26,7 @@ app = Flask(__name__)
 
 # 2. 📺 أرقام القنوات
 PRIVATE_CHANNEL = -1004495050725
-PUBLIC_CHANNEL = -1004102734458
+PUBLIC_CHANNEL = -1004296605891
 
 db_lock = threading.Lock()
 
